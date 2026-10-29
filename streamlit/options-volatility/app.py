@@ -1,5 +1,5 @@
 import streamlit as st
-from my_functions import get_vol_surface_data, plot_2d_skew_by_expiry
+from analytics import get_vol_surface_data, plot_2d_skew_by_expiry
 
 
 st.title("Options Volatility Surface Skew")
@@ -7,7 +7,7 @@ st.title("Options Volatility Surface Skew")
 
 # User inputs
 ticker = st.sidebar.text_input("Ticker Symbol", value="AMZN")
-max_days = st.sidebar.slider("Max Days to Expiry", 30, 45, 60)
+max_days = st.sidebar.slider("Max Days to Expiry", min_value=30, max_value=60, value=45)
 
 
 if st.button("Generate Plot"):
@@ -19,4 +19,7 @@ if st.button("Generate Plot"):
         fig = plot_2d_skew_by_expiry(df, ticker)
         
         # Display in Streamlit
-        st.pyplot(fig)
+        if fig is not None:
+            st.pyplot(fig)
+        else:
+            st.warning(f"No options data available to plot for {ticker}.")

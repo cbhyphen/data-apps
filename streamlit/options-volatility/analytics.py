@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from scipy.interpolate import make_interp_spline
 from alpaca_client import fetch_raw_options_chain, get_latest_price
 
@@ -101,6 +104,10 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     """
     Plot 2D IV skew across expiry
     """
+
+    if df.empty or 'days_to_expiry' not in df.columns:
+        print("no data available to plot !!!")
+        return None
 
     df = df[df['days_to_expiry'] >= 5].copy()
     if df.empty:
