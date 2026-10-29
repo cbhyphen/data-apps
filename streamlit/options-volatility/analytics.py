@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from scipy.interpolate import make_interp_spline
-from alpaca_client import fetch_raw_options_chain
+from alpaca_client import fetch_raw_options_chain, get_latest_price
 
 
 # get next friday deltas from today that are at least 5 days out
@@ -110,10 +110,7 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     fig = plt.figure(figsize=(10, 6))
 
     # fetch spot price for the vertical line
-    stock_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-    trade_req = StockLatestTradeRequest(symbol_or_symbols=ticker)
-    latest_trade = stock_client.get_stock_latest_trade(trade_req)
-    underlying_price = latest_trade[ticker].price
+    underlying_price = get_latest_price(ticker)
 
     expiries = sorted(df['days_to_expiry'].unique())[:max_lines]
     num_expiries = len(expiries)

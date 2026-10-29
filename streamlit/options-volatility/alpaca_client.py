@@ -1,6 +1,9 @@
+from datetime import datetime, timedelta
+import os
+import re
+
 import numpy as np
 import pandas as pd
-import re
 
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest
@@ -15,9 +18,10 @@ ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
 def get_latest_price(ticker_symbol: str):
     # fetch spot price for the vertical line
     stock_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-    trade_req = StockLatestTradeRequest(symbol_or_symbols=ticker)
+    trade_req = StockLatestTradeRequest(symbol_or_symbols=ticker_symbol)
     latest_trade = stock_client.get_stock_latest_trade(trade_req)
-    underlying_price = latest_trade[ticker].price
+    underlying_price = latest_trade[ticker_symbol].price
+    return underlying_price
 
 
 # get raw call and put option chains for expiration date closest to target days
@@ -27,14 +31,11 @@ def fetch_raw_options_chain(
     ):
 
     opt_client = OptionHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
-    stock_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     trading_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
 
     # get spot price using using latest trade.
     # avoids 0.0 ask price when market is closed.
-    trade_req = StockLatestTradeRequest(symbol_or_symbols=ticker_symbol)
-    latest_trade = stock_client.get_stock_latest_trade(trade_req)
-    underlying_price = latest_trade[ticker_symbol].price
+    underlying_price = get_latest_price(ticker_symbol)
 
     today = datetime.today().date()
     target_date = today + timedelta(days=days_target)
