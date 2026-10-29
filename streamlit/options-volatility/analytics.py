@@ -122,7 +122,7 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     expiries = sorted(df['days_to_expiry'].unique())[:max_lines]
     
     fig = go.Figure()
-    colors = px.colors.sequential.Plasma
+    colors = px.colors.sequential.Plasma_r
 
     for i, days in enumerate(expiries):
         df_exp = df[df['days_to_expiry'] == days].sort_values(by='strike').drop_duplicates(subset=['strike'])
