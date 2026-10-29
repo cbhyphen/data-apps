@@ -81,6 +81,7 @@ def get_vol_surface_data(
 
             surface_data.append({
                 'days_to_expiry': days_to_expiry,
+                'expiration_date': closest_expiry,
                 'strike': row['strike'],
                 'moneyness': row['strike'] / underlying_price,
                 'implied_volatility': iv * 100
@@ -94,6 +95,7 @@ def get_vol_surface_data(
 
             surface_data.append({
                 'days_to_expiry': days_to_expiry,
+                'expiration_date': closest_expiry,
                 'strike': row['strike'],
                 'moneyness': row['strike'] / underlying_price,
                 'implied_volatility': iv * 100
