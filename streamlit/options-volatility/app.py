@@ -1,8 +1,9 @@
+import pandas as pd
 import streamlit as st
 from analytics import get_vol_surface_data, plot_2d_skew_by_expiry
 
 
-st.title("Options Volatility Surface Skew")
+st.title("Implied Volatility Skew")
 
 
 # User inputs
@@ -22,5 +23,20 @@ with st.spinner("Fetching data..."):
     # Display in Streamlit
     if fig is not None:
         st.plotly_chart(fig, use_container_width=True)
+
+        # Build Strike vs. Expiration IV table
+        st.subheader("Implied Volatility (%) by Strike & Expiration")
+        pivot_df = (
+            df[df["days_to_expiry"] >= 5]
+            .drop_duplicates(subset=["days_to_expiry", "strike"])
+            .pivot(index="strike", columns="days_to_expiry", values="implied_volatility")
+            .sort_index()
+        )
+        pivot_df.columns = [f"{days} Days" for days in pivot_df.columns]
+        pivot_df.index.name = "Strike"
+        display_df = pivot_df.apply(
+            lambda col: col.map(lambda x: "NA" if pd.isna(x) else f"{x:.2f}%")
+        )
+        st.dataframe(display_df, use_container_width=True)
     else:
         st.warning(f"No options data available to plot for {ticker}.")
