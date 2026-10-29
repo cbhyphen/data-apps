@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 from scipy.interpolate import make_interp_spline
+
 from alpaca_client import fetch_raw_options_chain, get_latest_price
 
 
@@ -114,40 +116,69 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
         print("no data available to plot !!!")
         return None
 
-    fig = plt.figure(figsize=(10, 6))
-
     # fetch spot price for the vertical line
     underlying_price = get_latest_price(ticker)
 
     expiries = sorted(df['days_to_expiry'].unique())[:max_lines]
-    num_expiries = len(expiries)
-    colormap = plt.cm.plasma
+    
+    fig = go.Figure()
+    colors = px.colors.sequential.Plasma
 
     for i, days in enumerate(expiries):
         df_exp = df[df['days_to_expiry'] == days].sort_values(by='strike').drop_duplicates(subset=['strike'])
-        color_idx = 0.85 - (i / max(1, num_expiries - 1)) * 0.75
-        color = colormap(color_idx)
+        
+        # Safely map to color scale
+        color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
+        color = colors[color_idx]
 
         x = df_exp['strike'].values
         y = df_exp['implied_volatility'].values
 
         if len(x) > 3:
+            # Spline interpolation for smooth curve
             x_smooth = np.linspace(x.min(), x.max(), 300)
             spl = make_interp_spline(x, y, k=3)
             y_smooth = spl(x_smooth)
-            plt.plot(x_smooth, y_smooth, color=color, linewidth=1.8, label=f'{days} Days')
-            plt.plot(x, y, marker='o', color=color, linestyle='None', alpha=0.4, markersize=4)
-        else:
-            plt.plot(x, y, marker='o', color=color, linewidth=1.8, label=f'{days} Days')
 
-    plt.axvline(x=underlying_price, color='red', linestyle='--',
-                linewidth=1.5, label=f'spot price (${underlying_price:.2f})'
-                )
-    plt.title(f"{ticker} IV Skew by Expiration")
-    plt.xlabel('strike')
-    plt.ylabel('IV (%)')
-    plt.legend(title='days to expiry', bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True, linestyle='--', alpha=0.5)
-    plt.tight_layout()
-    
+            # Add smooth line
+            fig.add_trace(go.Scatter(
+                x=x_smooth, y=y_smooth,
+                mode='lines',
+                line=dict(color=color, width=2.5),
+                name=f'{days} Days',
+                legendgroup=f'{days}'
+            ))
+            # Add actual data points
+            fig.add_trace(go.Scatter(
+                x=x, y=y,
+                mode='markers',
+                marker=dict(color=color, size=6, opacity=0.5),
+                legendgroup=f'{days}',
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+        else:
+            # Fallback if not enough points for spline
+            fig.add_trace(go.Scatter(
+                x=x, y=y,
+                mode='lines+markers',
+                line=dict(color=color, width=2.5),
+                name=f'{days} Days'
+            ))
+
+    # Add vertical line for Spot Price
+    fig.add_vline(x=underlying_price, line_dash="dash", line_color="red", 
+                  annotation_text=f"Spot: ${underlying_price:.2f}", 
+                  annotation_position="top right")
+
+    # Layout config
+    fig.update_layout(
+        title=f"{ticker} IV Skew by Expiration",
+        xaxis_title="Strike Price",
+        yaxis_title="Implied Volatility (%)",
+        hovermode="x unified",
+        template="plotly_dark", # Matches well with dark themed apps; switch to 'plotly_white' if needed
+        legend=dict(title="Days to Expiry", yanchor="top", y=1, xanchor="left", x=1.02)
+    )
+
     return fig

@@ -20,6 +20,6 @@ if st.button("Generate Plot"):
         
         # Display in Streamlit
         if fig is not None:
-            st.pyplot(fig)
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f"No options data available to plot for {ticker}.")
