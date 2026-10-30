@@ -24,7 +24,7 @@ def get_delta_next_fridays(max_days: int = 60) -> list[int]:
 def get_vol_surface_data(
     ticker_symbol: str,
     max_days: int = 60,
-    moneyness_bound: float = 0.30,
+    moneyness_bound: float = 0.20,
 ) -> pd.DataFrame:
     """
     fetch option data for next 'max_days',
