@@ -1,9 +1,13 @@
-from datetime import datetime, timedelta
 import os
 import re
+import threading
+import time
+from collections import deque
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest
@@ -13,10 +17,44 @@ from alpaca.trading.requests import GetOptionContractsRequest
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
 ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
+MAX_CALLS_PER_MINUTE = 150  # safety buffer below alpaca 200/min free-tier limit
 
 
+class RateLimitError(Exception):
+    pass
+
+
+@st.cache_resource
+def _get_rate_limit_state():
+    return deque(), threading.Lock()
+
+
+def _record_api_call():
+    """
+    sliding-window rate limiter shared across all Streamlit sessions
+    """
+    timestamps, lock = _get_rate_limit_state()
+    with lock:
+        now = time.monotonic()
+        while timestamps and now - timestamps[0] >= 60.0:
+            timestamps.popleft()
+
+        if len(timestamps) >= MAX_CALLS_PER_MINUTE:
+            wait_seconds = int(60.0 - (now - timestamps[0])) + 1
+            raise RateLimitError(
+                f"Alpaca API rate limit reached ({MAX_CALLS_PER_MINUTE} calls/min). "
+                f"please wait ~{wait_seconds}s and try again."
+            )
+
+        timestamps.append(now)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
 def get_latest_price(ticker_symbol: str):
-    # fetch spot price for the vertical line
+    """
+    fetch latest spot price
+    """
+    _record_api_call()
     stock_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     trade_req = StockLatestTradeRequest(symbol_or_symbols=ticker_symbol)
     latest_trade = stock_client.get_stock_latest_trade(trade_req)
@@ -24,18 +62,24 @@ def get_latest_price(ticker_symbol: str):
     return underlying_price
 
 
-# get raw call and put option chains for expiration date closest to target days
+@st.cache_data(ttl=120, show_spinner=False)
 def fetch_raw_options_chain(
     ticker_symbol: str,
-    days_target: int = 60
-    ):
+    days_target: int = 60,
+    underlying_price: float | None = None,
+    moneyness_bound: float = 0.30,
+    ) -> dict:
+    """
+    get raw call and put option chains for expiration date closest to target days
+    """
 
     opt_client = OptionHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     trading_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
 
-    # get spot price using using latest trade.
+    # get spot price using latest trade if not provided.
     # avoids 0.0 ask price when market is closed.
-    underlying_price = get_latest_price(ticker_symbol)
+    if underlying_price is None:
+        underlying_price = get_latest_price(ticker_symbol)
 
     today = datetime.today().date()
     target_date = today + timedelta(days=days_target)
@@ -49,23 +93,23 @@ def fetch_raw_options_chain(
         expiration_date_lte=target_date + timedelta(days=3)
     )
     # query Metadata API to get contract symbols
+    _record_api_call()
     contracts_meta = trading_client.get_option_contracts(contracts_req)
 
     if not contracts_meta.option_contracts:
         raise ValueError(f"no options contracts found for {ticker_symbol} around {target_date}")
 
     # find closest expiration date
-    unique_dates = set(c.expiration_date for c in contracts_meta.option_contracts)
-    exp_dates = list(unique_dates)
-    days_diffs = [abs((exp - today).days - days_target) for exp in exp_dates]
-    closest_idx = np.argmin(days_diffs)
-    closest_expiry = exp_dates[closest_idx]
+    closest_expiry = min(
+        {c.expiration_date for c in contracts_meta.option_contracts},
+        key=lambda exp: abs((exp - today).days - days_target),
+    )
 
     t_years = (closest_expiry - today).days / 365.0
 
-    # filter symbols by closest expiry and moneyness bounds (+/- 35%)
-    strike_min = underlying_price * 0.65
-    strike_max = underlying_price * 1.35
+    # filter symbols by closest expiry and moneyness bounds
+    strike_min = underlying_price * (1.0 - moneyness_bound)
+    strike_max = underlying_price * (1.0 + moneyness_bound)
     target_symbols = []
 
     for c in contracts_meta.option_contracts:
@@ -79,6 +123,7 @@ def fetch_raw_options_chain(
 
     # fetch pricing / greeks ONLY for kept symbols.
     # drastically reduces payload compared to the full chain.
+    _record_api_call()
     snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols)
     snapshots = opt_client.get_option_snapshot(snap_req)
 
