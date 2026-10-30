@@ -84,13 +84,19 @@ def fetch_raw_options_chain(
     today = datetime.today().date()
     target_date = today + timedelta(days=days_target)
 
-    # contracts request strictly around the target expiration window
-    # instead of starting from today, preventing pagination limits from hiding later dates
+    strike_min = underlying_price * (1.0 - moneyness_bound)
+    strike_max = underlying_price * (1.0 + moneyness_bound)
+
+    # contracts request strictly around the target Friday window (including Thursday for holidays)
+    # and bounded by strike range so pagination limits don't truncate puts or near-spot strikes
     contracts_req = GetOptionContractsRequest(
         underlying_symbols=[ticker_symbol],
         status="active",
-        expiration_date_gte=target_date - timedelta(days=3),
-        expiration_date_lte=target_date + timedelta(days=3)
+        expiration_date_gte=target_date - timedelta(days=1),
+        expiration_date_lte=target_date,
+        strike_price_gte=f"{strike_min:.2f}",
+        strike_price_lte=f"{strike_max:.2f}",
+        limit=1000,
     )
     # query Metadata API to get contract symbols
     _record_api_call()
@@ -99,33 +105,35 @@ def fetch_raw_options_chain(
     if not contracts_meta.option_contracts:
         raise ValueError(f"no options contracts found for {ticker_symbol} around {target_date}")
 
-    # find closest expiration date
+    # prefer exact Friday match, falling back to Thursday if Friday is a market holiday
     closest_expiry = min(
         {c.expiration_date for c in contracts_meta.option_contracts},
-        key=lambda exp: abs((exp - today).days - days_target),
+        key=lambda exp: abs((exp - target_date).days),
     )
 
     t_years = (closest_expiry - today).days / 365.0
 
-    # filter symbols by closest expiry and moneyness bounds
-    strike_min = underlying_price * (1.0 - moneyness_bound)
-    strike_max = underlying_price * (1.0 + moneyness_bound)
-    target_symbols = []
-
-    for c in contracts_meta.option_contracts:
-        if c.expiration_date == closest_expiry:
-            strike = float(c.strike_price)
-            if strike_min <= strike <= strike_max and strike % 5 == 0:
-                target_symbols.append(c.symbol)
+    # filter symbols by closest expiry; prefer $5 strike increments when enough exist for spline fitting
+    expiry_contracts = [
+        c for c in contracts_meta.option_contracts
+        if c.expiration_date == closest_expiry
+        and strike_min <= float(c.strike_price) <= strike_max
+    ]
+    target_symbols = [
+        c.symbol for c in expiry_contracts if float(c.strike_price) % 5 == 0
+    ]
+    if len(target_symbols) < 8:
+        target_symbols = [c.symbol for c in expiry_contracts]
 
     if not target_symbols:
         raise ValueError(f"no strikes found within bounds for expiry {closest_expiry}")
 
-    # fetch pricing / greeks ONLY for kept symbols.
-    # drastically reduces payload compared to the full chain.
-    _record_api_call()
-    snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols)
-    snapshots = opt_client.get_option_snapshot(snap_req)
+    # fetch pricing / greeks ONLY for kept symbols (batched in chunks of 100 per Alpaca API limit)
+    snapshots = {}
+    for i in range(0, len(target_symbols), 100):
+        _record_api_call()
+        snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols[i : i + 100])
+        snapshots.update(opt_client.get_option_snapshot(snap_req))
 
     records = []
     for sym, snapshot in snapshots.items():
