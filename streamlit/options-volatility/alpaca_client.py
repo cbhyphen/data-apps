@@ -115,7 +115,7 @@ def fetch_raw_options_chain(
     for c in contracts_meta.option_contracts:
         if c.expiration_date == closest_expiry:
             strike = float(c.strike_price)
-            if strike_min <= strike <= strike_max:
+            if strike_min <= strike <= strike_max and strike % 5 == 0:
                 target_symbols.append(c.symbol)
 
     if not target_symbols:
