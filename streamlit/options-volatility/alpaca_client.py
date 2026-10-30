@@ -67,7 +67,7 @@ def fetch_raw_options_chain(
     ticker_symbol: str,
     days_target: int = 60,
     underlying_price: float | None = None,
-    moneyness_bound: float = 0.20,
+    moneyness_bound: float = 0.30,
     ) -> dict:
     """
     get raw call and put option chains for expiration date closest to target days
