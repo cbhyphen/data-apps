@@ -10,9 +10,11 @@ import pandas as pd
 import streamlit as st
 
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
-from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest
+from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest, StockBarsRequest
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOptionContractsRequest
+from alpaca.data.timeframe import TimeFrame
+from alpaca.data.enums import DataFeed
 
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
@@ -177,3 +179,35 @@ def fetch_raw_options_chain(
         'puts': puts,
         'closest_expiry_str': closest_expiry_str
     }
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_alpaca_ohlcv(
+    ticker_symbol: str,
+    lookback_days: int = 120
+    ):
+    """
+    fetch open, high, low, close, volume data for ticker
+    """
+    _record_api_call()
+    client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+
+    end_date = datetime.today()
+    start_date = end_date - timedelta(days=lookback_days)
+
+    request_params = StockBarsRequest(
+        symbol_or_symbols=ticker_symbol,
+        timeframe=TimeFrame.Day,
+        start=start_date,
+        end=end_date,
+        # alpaca free tier restricts recent SIP data (15-min delay)
+        # `feed=DataFeed.IEX` makes sure get this delayed data
+        feed=DataFeed.IEX
+    )
+
+    bars = client.get_stock_bars(request_params)
+    df = bars.df.reset_index()
+
+    df.rename(columns={'symbol': 'ticker', 'timestamp': 'date'}, inplace=True)
+    column_order = ['date', 'ticker', 'open', 'high', 'low', 'close', 'volume']
+    return df[column_order]

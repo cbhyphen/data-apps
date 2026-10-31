@@ -1,7 +1,12 @@
 import pandas as pd
 import streamlit as st
 from alpaca_client import RateLimitError
-from analytics import get_vol_surface_data, plot_2d_skew_by_expiry
+from analytics import (
+    get_multi_window_vrp,
+    get_vol_surface_data,
+    plot_2d_skew_by_expiry,
+    plot_vrp_by_expiry,
+)
 
 
 # User inputs
@@ -15,9 +20,11 @@ with st.spinner("fetching data..."):
     try:
         # Fetch data
         df = get_vol_surface_data(ticker, max_days=max_days)
+        vrp_df = get_multi_window_vrp(ticker, max_days=max_days)
 
-        # Generate plot
+        # Generate plots
         fig = plot_2d_skew_by_expiry(df, ticker)
+        vrp_fig = plot_vrp_by_expiry(vrp_df, ticker)
     except RateLimitError as e:
         st.warning(str(e))
         st.stop()
@@ -25,6 +32,9 @@ with st.spinner("fetching data..."):
     # Display in Streamlit
     if fig is not None:
         st.plotly_chart(fig, use_container_width=True)
+
+        if vrp_fig is not None:
+            st.plotly_chart(vrp_fig, use_container_width=True)
 
         # Build Strike vs. Expiration Date IV table
         pivot_df = (
