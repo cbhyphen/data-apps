@@ -322,7 +322,7 @@ def plot_vrp_by_expiry(multi_vrp_df: pd.DataFrame, ticker: str):
     fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.6)
 
     fig.update_layout(
-        title=f"{ticker} VRP by Days to Expiry",
+        title=f"{ticker} VRP by Expiration",
         xaxis_title="Days to Expiry",
         yaxis_title="Percent (%)",
         hovermode="x unified",
