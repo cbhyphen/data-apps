@@ -145,6 +145,11 @@ def fetch_raw_options_chain(
         snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols[i : i + 100])
         snapshots.update(opt_client.get_option_snapshot(snap_req))
 
+    oi_by_symbol = {
+        c.symbol: float(c.open_interest) if getattr(c, "open_interest", None) is not None else np.nan
+        for c in expiry_contracts
+    }
+
     records = []
     for sym in target_symbols:
         match = re.match(r'^([A-Za-z]+)(\d{6})([CP])(\d{8})$', sym)
@@ -162,10 +167,14 @@ def fetch_raw_options_chain(
 
         latest_trade = snapshot.latest_trade if snapshot else None
         latest_quote = snapshot.latest_quote if snapshot else None
+        bid = float(latest_quote.bid_price) if (latest_quote and latest_quote.bid_price is not None) else np.nan
+        ask = float(latest_quote.ask_price) if (latest_quote and latest_quote.ask_price is not None) else np.nan
+        spread = (ask - bid) if (pd.notna(bid) and pd.notna(ask) and ask >= bid and ask > 0) else np.nan
+
         if latest_trade and latest_trade.price:
             price = float(latest_trade.price)
-        elif latest_quote and latest_quote.bid_price and latest_quote.ask_price:
-            price = (float(latest_quote.bid_price) + float(latest_quote.ask_price)) / 2.0
+        elif pd.notna(bid) and pd.notna(ask) and bid > 0 and ask > 0:
+            price = (bid + ask) / 2.0
         else:
             price = np.nan
 
@@ -175,6 +184,10 @@ def fetch_raw_options_chain(
             'contract_type': contract_type,
             'strike': strike,
             'price': price,
+            'bid': bid,
+            'ask': ask,
+            'spread': spread,
+            'open_interest': oi_by_symbol.get(sym, np.nan),
             'impliedVolatility': iv if (iv is not None and iv > 0.001) else np.nan,
             'delta': delta if delta is not None else np.nan,
         })

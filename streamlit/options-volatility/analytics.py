@@ -48,23 +48,36 @@ def get_vol_surface_data(
 
         # use ATM call for the strike nearest to spot, OTM puts below it, and OTM calls above it
         atm_strike = calls.loc[(calls['strike'] - underlying_price).abs().idxmin(), 'strike']
-        otm_options = pd.concat([
-            puts[puts['strike'] < atm_strike],
-            calls[calls['strike'] >= atm_strike],
-        ])
+        puts_indexed = puts.drop_duplicates(subset=['strike']).set_index('strike')
+        calls_indexed = calls.drop_duplicates(subset=['strike']).set_index('strike')
+        strikes = sorted(set(puts_indexed.index).union(set(calls_indexed.index)))
 
-        for _, row in otm_options.iterrows():
-            iv = row.get('impliedVolatility', np.nan)
+        for strike in strikes:
+            put_row = puts_indexed.loc[strike] if strike in puts_indexed.index else None
+            call_row = calls_indexed.loc[strike] if strike in calls_indexed.index else None
+            otm_row = put_row if strike < atm_strike else call_row
+
+            iv = otm_row.get('impliedVolatility', np.nan) if otm_row is not None else np.nan
             iv_pct = iv * 100 if (pd.notna(iv) and iv > 0.001) else np.nan
+            otm_delta = otm_row.get('delta', np.nan) if otm_row is not None else np.nan
+            otm_price = otm_row.get('price', np.nan) if otm_row is not None else np.nan
 
             surface_data.append({
                 'days_to_expiry': days_to_expiry,
                 'expiration_date': closest_expiry,
-                'strike': row['strike'],
-                'moneyness': row['strike'] / underlying_price,
+                'strike': strike,
+                'moneyness': strike / underlying_price,
                 'implied_volatility': iv_pct,
-                'delta': row.get('delta', np.nan),
-                'price': row.get('price', np.nan),
+                'delta': otm_delta,
+                'price': otm_price,
+                'put_price': put_row.get('price', np.nan) if put_row is not None else np.nan,
+                'put_delta': put_row.get('delta', np.nan) if put_row is not None else np.nan,
+                'put_spread': put_row.get('spread', np.nan) if put_row is not None else np.nan,
+                'put_oi': put_row.get('open_interest', np.nan) if put_row is not None else np.nan,
+                'call_price': call_row.get('price', np.nan) if call_row is not None else np.nan,
+                'call_delta': call_row.get('delta', np.nan) if call_row is not None else np.nan,
+                'call_spread': call_row.get('spread', np.nan) if call_row is not None else np.nan,
+                'call_oi': call_row.get('open_interest', np.nan) if call_row is not None else np.nan,
             })
 
     return pd.DataFrame(surface_data)

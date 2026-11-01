@@ -69,11 +69,17 @@ with st.spinner("fetching data..."):
 
                 display_df = pd.DataFrame(
                     {
-                        "Delta": exp_df["delta"].map(
+                        "Put Price": exp_df["put_price"].map(
+                            lambda x: "NA" if pd.isna(x) else f"${x:.2f}"
+                        ),
+                        "Put Delta": exp_df["put_delta"].map(
                             lambda x: "NA" if pd.isna(x) else f"{x:.3f}"
                         ),
-                        "Price": exp_df["price"].map(
+                        "Call Price": exp_df["call_price"].map(
                             lambda x: "NA" if pd.isna(x) else f"${x:.2f}"
+                        ),
+                        "Call Delta": exp_df["call_delta"].map(
+                            lambda x: "NA" if pd.isna(x) else f"{x:.3f}"
                         ),
                     },
                     index=exp_df.index,
