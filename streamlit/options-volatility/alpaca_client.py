@@ -89,27 +89,35 @@ def fetch_raw_options_chain(
     strike_min = underlying_price * (1.0 - moneyness_bound)
     strike_max = underlying_price * (1.0 + moneyness_bound)
 
-    # contracts request around the target expiration window and bounded by strike range
-    # so pagination limits don't truncate puts or near-spot strikes
-    contracts_req = GetOptionContractsRequest(
-        underlying_symbols=[ticker_symbol],
-        status="active",
-        expiration_date_gte=target_date - timedelta(days=3),
-        expiration_date_lte=target_date + timedelta(days=3),
-        strike_price_gte=f"{strike_min:.2f}",
-        strike_price_lte=f"{strike_max:.2f}",
-        limit=1000,
-    )
-    # query Metadata API to get contract symbols
-    _record_api_call()
-    contracts_meta = trading_client.get_option_contracts(contracts_req)
+    # paginate through Metadata API so expiries with $1/$2.50 strikes (>100 contracts)
+    # don't truncate puts on page 2
+    option_contracts = []
+    page_token = None
+    while True:
+        contracts_req = GetOptionContractsRequest(
+            underlying_symbols=[ticker_symbol],
+            status="active",
+            expiration_date_gte=target_date - timedelta(days=3),
+            expiration_date_lte=target_date + timedelta(days=3),
+            strike_price_gte=f"{strike_min:.2f}",
+            strike_price_lte=f"{strike_max:.2f}",
+            limit=1000,
+            page_token=page_token,
+        )
+        _record_api_call()
+        contracts_meta = trading_client.get_option_contracts(contracts_req)
+        if contracts_meta.option_contracts:
+            option_contracts.extend(contracts_meta.option_contracts)
+        page_token = getattr(contracts_meta, "next_page_token", None)
+        if not page_token:
+            break
 
-    if not contracts_meta.option_contracts:
+    if not option_contracts:
         raise ValueError(f"no options contracts found for {ticker_symbol} around {target_date}")
 
     # find closest expiration date (tie-breaking toward Fridays when equidistant)
     closest_expiry = min(
-        {c.expiration_date for c in contracts_meta.option_contracts},
+        {c.expiration_date for c in option_contracts},
         key=lambda exp: (abs((exp - target_date).days), 0 if exp.weekday() == 4 else 1),
     )
 
@@ -117,7 +125,7 @@ def fetch_raw_options_chain(
 
     # filter symbols by closest expiry; prefer $5 strike increments when enough exist for spline fitting
     expiry_contracts = [
-        c for c in contracts_meta.option_contracts
+        c for c in option_contracts
         if c.expiration_date == closest_expiry
         and strike_min <= float(c.strike_price) <= strike_max
     ]

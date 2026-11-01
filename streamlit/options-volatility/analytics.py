@@ -184,9 +184,11 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
         color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
         color = colors[color_idx]
 
+        y_iv = df_exp['implied_volatility'].interpolate(method='index', limit_area='inside')
+
         fig.add_trace(go.Scatter(
             x=all_strikes,
-            y=df_exp['implied_volatility'],
+            y=y_iv,
             mode='lines+markers',
             connectgaps=True,
             line=dict(color=color, width=2.5, shape='spline'),
@@ -206,6 +208,7 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
         xaxis_title="Strike Price",
         yaxis_title="Implied Volatility (%)",
         hovermode="x unified",
+        hoverdistance=1,
         template="plotly_dark",  #  'plotly_white'
         legend=dict(title="Expiration Date", yanchor="top", y=1, xanchor="left", x=1.02)
     )
@@ -313,9 +316,11 @@ def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: i
         color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
         color = colors[color_idx]
 
+        y_delta = np.abs(df_exp['delta']).interpolate(method='index', limit_area='inside')
+
         fig.add_trace(go.Scatter(
             x=all_strikes,
-            y=np.abs(df_exp['delta']),
+            y=y_delta,
             mode='lines+markers',
             connectgaps=True,
             line=dict(color=color, width=2.5),
@@ -337,6 +342,7 @@ def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: i
         xaxis_title="Strike Price",
         yaxis_title="Absolute Delta |Δ|",
         hovermode="x unified",
+        hoverdistance=1,
         template="plotly_dark",
         legend=dict(title="Expiration Date", yanchor="top", y=1, xanchor="left", x=1.02),
     )
