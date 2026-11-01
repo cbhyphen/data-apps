@@ -46,10 +46,11 @@ def get_vol_surface_data(
         if puts.empty or calls.empty:
             continue
 
-        # combine OTM puts (strikes <= spot) and OTM calls (strikes > spot)
+        # use ATM call for the strike nearest to spot, OTM puts below it, and OTM calls above it
+        atm_strike = calls.loc[(calls['strike'] - underlying_price).abs().idxmin(), 'strike']
         otm_options = pd.concat([
-            puts[puts['strike'] <= underlying_price],
-            calls[calls['strike'] > underlying_price],
+            puts[puts['strike'] < atm_strike],
+            calls[calls['strike'] >= atm_strike],
         ])
 
         for _, row in otm_options.iterrows():

@@ -41,13 +41,14 @@ with st.spinner("fetching data..."):
         if vrp_fig is not None:
             st.plotly_chart(vrp_fig, use_container_width=True)
 
-        # Color rows based on whether strike is above or at/below spot price
+        # Color rows based on whether strike is an ATM/OTM call (>= atm_strike) or OTM put (< atm_strike)
         spot_price = (df["strike"] / df["moneyness"]).iloc[0]
+        atm_strike = df.loc[(df["strike"] - spot_price).abs().idxmin(), "strike"]
 
         def highlight_by_spot(row):
             color = (
                 "background-color: rgba(46, 204, 113, 0.15)"
-                if row.name > spot_price
+                if row.name >= atm_strike
                 else "background-color: rgba(231, 76, 60, 0.15)"
             )
             return [color] * len(row)
