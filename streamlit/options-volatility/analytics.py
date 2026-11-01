@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from scipy.interpolate import make_interp_spline
 
 from alpaca_client import (
     RateLimitError,
@@ -226,40 +225,15 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
         color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
         color = colors[color_idx]
 
-        x = df_exp['strike'].values
-        y = df_exp['implied_volatility'].values
-
-        if len(x) > 3:
-            # spline interpolation for smooth curve
-            x_smooth = np.linspace(x.min(), x.max(), 300)
-            spl = make_interp_spline(x, y, k=3)
-            y_smooth = spl(x_smooth)
-
-            # add smooth line
-            fig.add_trace(go.Scatter(
-                x=x_smooth, y=y_smooth,
-                mode='lines',
-                line=dict(color=color, width=2.5),
-                name=f'{expiry}',
-                legendgroup=f'{expiry}'
-            ))
-            # add actual data points
-            fig.add_trace(go.Scatter(
-                x=x, y=y,
-                mode='markers',
-                marker=dict(color=color, size=6, opacity=0.5),
-                legendgroup=f'{expiry}',
-                showlegend=False,
-                hoverinfo='skip'
-            ))
-        else:
-            # fallback if not enough points for spline
-            fig.add_trace(go.Scatter(
-                x=x, y=y,
-                mode='lines+markers',
-                line=dict(color=color, width=2.5),
-                name=f'{expiry}'
-            ))
+        fig.add_trace(go.Scatter(
+            x=df_exp['strike'],
+            y=df_exp['implied_volatility'],
+            mode='lines+markers',
+            line=dict(color=color, width=2.5, shape='spline'),
+            marker=dict(color=color, size=6, opacity=0.6),
+            name=f'{expiry}',
+            legendgroup=f'{expiry}',
+        ))
 
     # vertical line for spot price
     fig.add_vline(x=underlying_price, line_dash="dash", line_color="red",
@@ -383,7 +357,7 @@ def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: i
                 x=calls_otm['strike'],
                 y=np.abs(calls_otm['delta']),
                 mode='lines+markers',
-                line=dict(color=color, width=2.5, dash='solid'),
+                line=dict(color=color, width=2.5),
                 marker=dict(color=color, size=5, opacity=0.6),
                 name=f'{expiry}',
                 legendgroup=f'{expiry}',
@@ -396,7 +370,7 @@ def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: i
                 x=puts_otm['strike'],
                 y=np.abs(puts_otm['delta']),
                 mode='lines+markers',
-                line=dict(color=color, width=2.5, dash='dash'),
+                line=dict(color=color, width=2.5),
                 marker=dict(color=color, size=5, opacity=0.6),
                 name=f'{expiry}',
                 legendgroup=f'{expiry}',
@@ -412,7 +386,7 @@ def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: i
     )
 
     fig.update_layout(
-        title=f"{ticker} OTM Absolute Delta by Expiration (Calls: Solid, Puts: Dashed)",
+        title=f"{ticker} Absolute Delta by Expiration (OTM Puts and Calls)",
         xaxis_title="Strike Price",
         yaxis_title="Absolute Delta |Δ|",
         hovermode="x unified",
