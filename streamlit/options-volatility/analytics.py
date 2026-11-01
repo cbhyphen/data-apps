@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta
-
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -11,18 +9,7 @@ from alpaca_client import (
     get_alpaca_ohlcv,
     get_latest_price,
 )
-
-
-def get_delta_next_fridays(max_days: int = 60) -> list[int]:
-    """
-    get friday deltas from today between 5 and max_days out
-    """
-    today = datetime.today().date()
-    return [
-        days
-        for days in range(5, max_days + 1)
-        if (today + timedelta(days=days)).weekday() == 4
-    ]
+from utils import compute_yang_zhang, get_delta_next_fridays
 
 
 def get_vol_surface_data(
@@ -82,49 +69,6 @@ def get_vol_surface_data(
     return pd.DataFrame(surface_data)
 
 
-def compute_yang_zhang(df, window, periods_per_year=252):
-    """
-    compute Yang-Zhang realized volatility estimator on daily OHLC data
-    """
-    if df.empty or len(df) < 2:
-        return np.nan
-
-    o = pd.Series(df['open'].astype(float).values, index=df.index)
-    h = pd.Series(df['high'].astype(float).values, index=df.index)
-    l = pd.Series(df['low'].astype(float).values, index=df.index)
-    c = pd.Series(df['close'].astype(float).values, index=df.index)
-
-    c_prev = c.shift(1)
-
-    log_oc = np.log(o / c_prev)
-    log_co = np.log(c / o)
-    log_ho = np.log(h / o)
-    log_lo = np.log(l / o)
-    log_hc = np.log(h / c)
-    log_lc = np.log(l / c)
-
-    rs = log_ho * log_hc + log_lo * log_lc
-
-    if window <= 1:
-        var_overnight = log_oc ** 2
-        var_open_to_close = log_co ** 2
-        var_rs = rs
-        k = 0
-    else:
-        var_overnight = log_oc.rolling(window=window, min_periods=2).var(ddof=1)
-        var_open_to_close = log_co.rolling(window=window, min_periods=2).var(ddof=1)
-        var_rs = rs.rolling(window=window, min_periods=1).mean()
-        k = 0.34 / (1.34 + (window + 1) / (window - 1))
-
-    yz_var = var_overnight + k * var_open_to_close + (1 - k) * var_rs
-    latest_var = yz_var.iloc[-1]
-    if pd.isna(latest_var):
-        return np.nan
-
-    latest_vol = np.sqrt(max(0.0, float(latest_var)) * periods_per_year)
-    return float(latest_vol)
-
-
 def get_multi_window_vrp(
     ticker_symbol: str,
     max_days: int = 60,
@@ -153,7 +97,13 @@ def get_multi_window_vrp(
         trading_days = max(2, int(round(w * 252 / 365)))
         rv_window = max(min_rv_window, trading_days) if use_min_rv else trading_days
         try:
-            rv_estimate = compute_yang_zhang(df_ohlc, window=rv_window)
+            rv_estimate = compute_yang_zhang(
+                open_prices=df_ohlc['open'],
+                high_prices=df_ohlc['high'],
+                low_prices=df_ohlc['low'],
+                close_prices=df_ohlc['close'],
+                window=rv_window,
+            )
         except Exception as e:
             print(f"Error calculating YZ RV for window {rv_window}: {e}")
             rv_estimate = np.nan

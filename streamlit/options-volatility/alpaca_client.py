@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import streamlit as st
-from scipy.optimize import brentq
-from scipy.stats import norm
 
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest, StockBarsRequest
@@ -17,6 +15,8 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOptionContractsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import Adjustment, DataFeed
+
+from utils import bs_delta, bs_implied_vol
 
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
@@ -139,19 +139,6 @@ def fetch_raw_options_chain(
         snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols[i : i + 100])
         snapshots.update(opt_client.get_option_snapshot(snap_req))
 
-    def _bs_price(sigma, spot, k, t, r, is_call):
-        sqrt_t = np.sqrt(t)
-        d1 = (np.log(spot / k) + (r + 0.5 * sigma ** 2) * t) / (sigma * sqrt_t)
-        d2 = d1 - sigma * sqrt_t
-        if is_call:
-            return spot * norm.cdf(d1) - k * np.exp(-r * t) * norm.cdf(d2)
-        return k * np.exp(-r * t) * norm.cdf(-d2) - spot * norm.cdf(-d1)
-
-    def _bs_delta(sigma, spot, k, t, r, is_call):
-        sqrt_t = np.sqrt(t)
-        d1 = (np.log(spot / k) + (r + 0.5 * sigma ** 2) * t) / (sigma * sqrt_t)
-        return float(norm.cdf(d1)) if is_call else float(norm.cdf(d1) - 1.0)
-
     r_free = 0.045
     records = []
     for sym in target_symbols:
@@ -179,22 +166,12 @@ def fetch_raw_options_chain(
             price = np.nan
 
         # fallback to Black-Scholes from option price when Alpaca snapshot omits IV or delta
-        if (iv is None or iv <= 0.001) and pd.notna(price) and price > 0 and t_years > 0:
-            try:
-                low_p = _bs_price(0.001, underlying_price, strike, t_years, r_free, is_call)
-                high_p = _bs_price(5.0, underlying_price, strike, t_years, r_free, is_call)
-                if low_p < price < high_p:
-                    iv = float(brentq(
-                        lambda s: _bs_price(s, underlying_price, strike, t_years, r_free, is_call) - price,
-                        0.001,
-                        5.0,
-                    ))
-            except Exception:
-                pass
+        if iv is None or iv <= 0.001:
+            iv = bs_implied_vol(price, underlying_price, strike, t_years, r_free, is_call)
 
         if delta is None and iv is not None and iv > 0.001 and t_years > 0:
             try:
-                delta = _bs_delta(iv, underlying_price, strike, t_years, r_free, is_call)
+                delta = bs_delta(iv, underlying_price, strike, t_years, r_free, is_call)
             except Exception:
                 pass
 
