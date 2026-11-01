@@ -89,28 +89,30 @@ def fetch_raw_options_chain(
     strike_min = underlying_price * (1.0 - moneyness_bound)
     strike_max = underlying_price * (1.0 + moneyness_bound)
 
-    # paginate through Metadata API so expiries with $1/$2.50 strikes (>100 contracts)
-    # don't truncate puts on page 2
+    # query calls and puts separately (and paginate if needed) so puts are never
+    # truncated behind calls when an expiration has >100 contracts in the strike window
     option_contracts = []
-    page_token = None
-    while True:
-        contracts_req = GetOptionContractsRequest(
-            underlying_symbols=[ticker_symbol],
-            status="active",
-            expiration_date_gte=target_date - timedelta(days=3),
-            expiration_date_lte=target_date + timedelta(days=3),
-            strike_price_gte=f"{strike_min:.2f}",
-            strike_price_lte=f"{strike_max:.2f}",
-            limit=1000,
-            page_token=page_token,
-        )
-        _record_api_call()
-        contracts_meta = trading_client.get_option_contracts(contracts_req)
-        if contracts_meta.option_contracts:
-            option_contracts.extend(contracts_meta.option_contracts)
-        page_token = getattr(contracts_meta, "next_page_token", None)
-        if not page_token:
-            break
+    for contract_type in ("call", "put"):
+        page_token = None
+        while True:
+            contracts_req = GetOptionContractsRequest(
+                underlying_symbols=[ticker_symbol],
+                status="active",
+                type=contract_type,
+                expiration_date_gte=target_date - timedelta(days=3),
+                expiration_date_lte=target_date + timedelta(days=3),
+                strike_price_gte=f"{strike_min:.2f}",
+                strike_price_lte=f"{strike_max:.2f}",
+                limit=1000,
+                page_token=page_token,
+            )
+            _record_api_call()
+            contracts_meta = trading_client.get_option_contracts(contracts_req)
+            if contracts_meta.option_contracts:
+                option_contracts.extend(contracts_meta.option_contracts)
+            page_token = getattr(contracts_meta, "next_page_token", None)
+            if not page_token:
+                break
 
     if not option_contracts:
         raise ValueError(f"no options contracts found for {ticker_symbol} around {target_date}")
@@ -197,9 +199,16 @@ def fetch_raw_options_chain(
     if chain_df.empty:
          raise ValueError(f"parsed option chain is empty for {ticker_symbol} at target expiry {closest_expiry}")
 
-    # separate by contract type
-    calls = chain_df[chain_df['contract_type'] == 'call'].copy()
-    puts = chain_df[chain_df['contract_type'] == 'put'].copy()
+    # separate by contract type and fill missing ITM deltas from the OTM side via put-call parity
+    # (Delta_put = Delta_call - 1, Delta_call = Delta_put + 1) without altering IV
+    calls = chain_df[chain_df['contract_type'] == 'call'].copy().set_index('strike')
+    puts = chain_df[chain_df['contract_type'] == 'put'].copy().set_index('strike')
+
+    calls['delta'] = calls['delta'].fillna(puts['delta'] + 1.0)
+    puts['delta'] = puts['delta'].fillna(calls['delta'] - 1.0)
+
+    calls = calls.reset_index()
+    puts = puts.reset_index()
 
     # format output to match expected columns
     closest_expiry_str = closest_expiry.strftime("%Y-%m-%d")
