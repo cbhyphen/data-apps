@@ -66,16 +66,15 @@ def get_vol_surface_data(
         ])
 
         for _, row in otm_options.iterrows():
-            iv = row.get('impliedVolatility', 0)
-            if pd.isna(iv) or iv <= 0.001:
-                continue
+            iv = row.get('impliedVolatility', np.nan)
+            iv_pct = iv * 100 if (pd.notna(iv) and iv > 0.001) else np.nan
 
             surface_data.append({
                 'days_to_expiry': days_to_expiry,
                 'expiration_date': closest_expiry,
                 'strike': row['strike'],
                 'moneyness': row['strike'] / underlying_price,
-                'implied_volatility': iv * 100,
+                'implied_volatility': iv_pct,
                 'delta': row.get('delta', np.nan),
                 'price': row.get('price', np.nan),
             })
@@ -219,7 +218,14 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     colors = px.colors.sequential.Plasma_r
 
     for i, expiry in enumerate(expiries):
-        df_exp = df[df['expiration_date'] == expiry].sort_values(by='strike').drop_duplicates(subset=['strike'])
+        df_exp = (
+            df[df['expiration_date'] == expiry]
+            .dropna(subset=['implied_volatility'])
+            .sort_values(by='strike')
+            .drop_duplicates(subset=['strike'])
+        )
+        if df_exp.empty:
+            continue
 
         # safely map to color scale
         color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))

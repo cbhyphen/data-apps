@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy.optimize import brentq
+from scipy.stats import norm
 
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest, StockBarsRequest
@@ -137,28 +139,64 @@ def fetch_raw_options_chain(
         snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols[i : i + 100])
         snapshots.update(opt_client.get_option_snapshot(snap_req))
 
+    def _bs_price(sigma, spot, k, t, r, is_call):
+        sqrt_t = np.sqrt(t)
+        d1 = (np.log(spot / k) + (r + 0.5 * sigma ** 2) * t) / (sigma * sqrt_t)
+        d2 = d1 - sigma * sqrt_t
+        if is_call:
+            return spot * norm.cdf(d1) - k * np.exp(-r * t) * norm.cdf(d2)
+        return k * np.exp(-r * t) * norm.cdf(-d2) - spot * norm.cdf(-d1)
+
+    def _bs_delta(sigma, spot, k, t, r, is_call):
+        sqrt_t = np.sqrt(t)
+        d1 = (np.log(spot / k) + (r + 0.5 * sigma ** 2) * t) / (sigma * sqrt_t)
+        return float(norm.cdf(d1)) if is_call else float(norm.cdf(d1) - 1.0)
+
+    r_free = 0.045
     records = []
-    for sym, snapshot in snapshots.items():
+    for sym in target_symbols:
         match = re.match(r'^([A-Za-z]+)(\d{6})([CP])(\d{8})$', sym)
         if not match:
             continue
 
         _, date_str, opt_type, strike_str = match.groups()
-        contract_type = 'call' if opt_type == 'C' else 'put'
+        is_call = opt_type == 'C'
+        contract_type = 'call' if is_call else 'put'
         strike = int(strike_str) / 1000.0
 
-        iv = snapshot.implied_volatility
-        greeks = snapshot.greeks
-        delta = greeks.delta if greeks else np.nan
+        snapshot = snapshots.get(sym)
+        iv = snapshot.implied_volatility if snapshot else None
+        greeks = snapshot.greeks if snapshot else None
+        delta = greeks.delta if greeks else None
 
-        latest_trade = snapshot.latest_trade
-        latest_quote = snapshot.latest_quote
+        latest_trade = snapshot.latest_trade if snapshot else None
+        latest_quote = snapshot.latest_quote if snapshot else None
         if latest_trade and latest_trade.price:
             price = float(latest_trade.price)
         elif latest_quote and latest_quote.bid_price and latest_quote.ask_price:
             price = (float(latest_quote.bid_price) + float(latest_quote.ask_price)) / 2.0
         else:
             price = np.nan
+
+        # fallback to Black-Scholes from option price when Alpaca snapshot omits IV or delta
+        if (iv is None or iv <= 0.001) and pd.notna(price) and price > 0 and t_years > 0:
+            try:
+                low_p = _bs_price(0.001, underlying_price, strike, t_years, r_free, is_call)
+                high_p = _bs_price(5.0, underlying_price, strike, t_years, r_free, is_call)
+                if low_p < price < high_p:
+                    iv = float(brentq(
+                        lambda s: _bs_price(s, underlying_price, strike, t_years, r_free, is_call) - price,
+                        0.001,
+                        5.0,
+                    ))
+            except Exception:
+                pass
+
+        if delta is None and iv is not None and iv > 0.001 and t_years > 0:
+            try:
+                delta = _bs_delta(iv, underlying_price, strike, t_years, r_free, is_call)
+            except Exception:
+                pass
 
         records.append({
             'symbol': sym,
@@ -175,9 +213,17 @@ def fetch_raw_options_chain(
     if chain_df.empty:
          raise ValueError(f"parsed option chain is empty for {ticker_symbol} at target expiry {closest_expiry}")
 
-    # separate by contract type
-    calls = chain_df[chain_df['contract_type'] == 'call'].copy()
-    puts = chain_df[chain_df['contract_type'] == 'put'].copy()
+    # separate by contract type and cross-fill missing IV/delta via put-call parity at matching strikes
+    calls = chain_df[chain_df['contract_type'] == 'call'].copy().set_index('strike')
+    puts = chain_df[chain_df['contract_type'] == 'put'].copy().set_index('strike')
+
+    calls['impliedVolatility'] = calls['impliedVolatility'].fillna(puts['impliedVolatility'])
+    puts['impliedVolatility'] = puts['impliedVolatility'].fillna(calls['impliedVolatility'])
+    calls['delta'] = calls['delta'].fillna(puts['delta'] + 1.0)
+    puts['delta'] = puts['delta'].fillna(calls['delta'] - 1.0)
+
+    calls = calls.reset_index()
+    puts = puts.reset_index()
 
     # format output to match expected columns
     closest_expiry_str = closest_expiry.strftime("%Y-%m-%d")
