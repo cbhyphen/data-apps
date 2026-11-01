@@ -163,6 +163,7 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     underlying_price = get_latest_price(ticker)
 
     expiries = sorted(df['expiration_date'].unique())[:max_lines]
+    all_strikes = sorted(df['strike'].unique())
 
     fig = go.Figure()
     colors = px.colors.sequential.Plasma_r
@@ -170,11 +171,12 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     for i, expiry in enumerate(expiries):
         df_exp = (
             df[df['expiration_date'] == expiry]
-            .dropna(subset=['implied_volatility'])
             .sort_values(by='strike')
             .drop_duplicates(subset=['strike'])
+            .set_index('strike')
+            .reindex(all_strikes)
         )
-        if df_exp.empty:
+        if df_exp['implied_volatility'].dropna().empty:
             continue
 
         # safely map to color scale
@@ -182,9 +184,10 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
         color = colors[color_idx]
 
         fig.add_trace(go.Scatter(
-            x=df_exp['strike'],
+            x=all_strikes,
             y=df_exp['implied_volatility'],
             mode='lines+markers',
+            connectgaps=True,
             line=dict(color=color, width=2.5, shape='spline'),
             marker=dict(color=color, size=6, opacity=0.6),
             name=f'{expiry}',
@@ -290,48 +293,35 @@ def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: i
 
     underlying_price = get_latest_price(ticker)
     expiries = sorted(df_valid['expiration_date'].unique())[:max_lines]
+    all_strikes = sorted(df['strike'].unique())
 
     fig = go.Figure()
     colors = px.colors.sequential.Viridis_r
 
     for i, expiry in enumerate(expiries):
         df_exp = (
-            df_valid[df_valid['expiration_date'] == expiry]
+            df[df['expiration_date'] == expiry]
             .sort_values(by='strike')
             .drop_duplicates(subset=['strike'])
+            .set_index('strike')
+            .reindex(all_strikes)
         )
-
-        puts_otm = df_exp[df_exp['strike'] <= underlying_price]
-        calls_otm = df_exp[df_exp['strike'] > underlying_price]
+        if df_exp['delta'].dropna().empty:
+            continue
 
         color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
         color = colors[color_idx]
-        shown_in_legend = False
 
-        if not calls_otm.empty:
-            fig.add_trace(go.Scatter(
-                x=calls_otm['strike'],
-                y=np.abs(calls_otm['delta']),
-                mode='lines+markers',
-                line=dict(color=color, width=2.5),
-                marker=dict(color=color, size=5, opacity=0.6),
-                name=f'{expiry}',
-                legendgroup=f'{expiry}',
-                showlegend=True,
-            ))
-            shown_in_legend = True
-
-        if not puts_otm.empty:
-            fig.add_trace(go.Scatter(
-                x=puts_otm['strike'],
-                y=np.abs(puts_otm['delta']),
-                mode='lines+markers',
-                line=dict(color=color, width=2.5),
-                marker=dict(color=color, size=5, opacity=0.6),
-                name=f'{expiry}',
-                legendgroup=f'{expiry}',
-                showlegend=not shown_in_legend,
-            ))
+        fig.add_trace(go.Scatter(
+            x=all_strikes,
+            y=np.abs(df_exp['delta']),
+            mode='lines+markers',
+            connectgaps=True,
+            line=dict(color=color, width=2.5),
+            marker=dict(color=color, size=5, opacity=0.6),
+            name=f'{expiry}',
+            legendgroup=f'{expiry}',
+        ))
 
     fig.add_vline(
         x=underlying_price,

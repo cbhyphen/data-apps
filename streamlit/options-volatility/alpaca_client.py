@@ -16,8 +16,6 @@ from alpaca.trading.requests import GetOptionContractsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import Adjustment, DataFeed
 
-from utils import bs_delta, bs_implied_vol
-
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
 ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
@@ -139,7 +137,6 @@ def fetch_raw_options_chain(
         snap_req = OptionSnapshotRequest(symbol_or_symbols=target_symbols[i : i + 100])
         snapshots.update(opt_client.get_option_snapshot(snap_req))
 
-    r_free = 0.045
     records = []
     for sym in target_symbols:
         match = re.match(r'^([A-Za-z]+)(\d{6})([CP])(\d{8})$', sym)
@@ -147,8 +144,7 @@ def fetch_raw_options_chain(
             continue
 
         _, date_str, opt_type, strike_str = match.groups()
-        is_call = opt_type == 'C'
-        contract_type = 'call' if is_call else 'put'
+        contract_type = 'call' if opt_type == 'C' else 'put'
         strike = int(strike_str) / 1000.0
 
         snapshot = snapshots.get(sym)
@@ -165,23 +161,13 @@ def fetch_raw_options_chain(
         else:
             price = np.nan
 
-        # fallback to Black-Scholes from option price when Alpaca snapshot omits IV or delta
-        if iv is None or iv <= 0.001:
-            iv = bs_implied_vol(price, underlying_price, strike, t_years, r_free, is_call)
-
-        if delta is None and iv is not None and iv > 0.001 and t_years > 0:
-            try:
-                delta = bs_delta(iv, underlying_price, strike, t_years, r_free, is_call)
-            except Exception:
-                pass
-
         records.append({
             'symbol': sym,
             'expiration_date': closest_expiry,
             'contract_type': contract_type,
             'strike': strike,
             'price': price,
-            'impliedVolatility': iv if iv is not None else np.nan,
+            'impliedVolatility': iv if (iv is not None and iv > 0.001) else np.nan,
             'delta': delta if delta is not None else np.nan,
         })
 
@@ -190,17 +176,9 @@ def fetch_raw_options_chain(
     if chain_df.empty:
          raise ValueError(f"parsed option chain is empty for {ticker_symbol} at target expiry {closest_expiry}")
 
-    # separate by contract type and cross-fill missing IV/delta via put-call parity at matching strikes
-    calls = chain_df[chain_df['contract_type'] == 'call'].copy().set_index('strike')
-    puts = chain_df[chain_df['contract_type'] == 'put'].copy().set_index('strike')
-
-    calls['impliedVolatility'] = calls['impliedVolatility'].fillna(puts['impliedVolatility'])
-    puts['impliedVolatility'] = puts['impliedVolatility'].fillna(calls['impliedVolatility'])
-    calls['delta'] = calls['delta'].fillna(puts['delta'] + 1.0)
-    puts['delta'] = puts['delta'].fillna(calls['delta'] - 1.0)
-
-    calls = calls.reset_index()
-    puts = puts.reset_index()
+    # separate by contract type
+    calls = chain_df[chain_df['contract_type'] == 'call'].copy()
+    puts = chain_df[chain_df['contract_type'] == 'put'].copy()
 
     # format output to match expected columns
     closest_expiry_str = closest_expiry.strftime("%Y-%m-%d")
