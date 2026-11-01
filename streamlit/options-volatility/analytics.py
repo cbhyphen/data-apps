@@ -206,20 +206,20 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
     """
     plot 2D IV skew across expiry
     """
-    if df.empty or 'days_to_expiry' not in df.columns:
+    if df.empty or 'expiration_date' not in df.columns:
         print("no data available to plot !!!")
         return None
 
     # fetch spot price for the vertical line
     underlying_price = get_latest_price(ticker)
 
-    expiries = sorted(df['days_to_expiry'].unique())[:max_lines]
+    expiries = sorted(df['expiration_date'].unique())[:max_lines]
 
     fig = go.Figure()
     colors = px.colors.sequential.Plasma_r
 
-    for i, days in enumerate(expiries):
-        df_exp = df[df['days_to_expiry'] == days].sort_values(by='strike').drop_duplicates(subset=['strike'])
+    for i, expiry in enumerate(expiries):
+        df_exp = df[df['expiration_date'] == expiry].sort_values(by='strike').drop_duplicates(subset=['strike'])
 
         # safely map to color scale
         color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
@@ -239,15 +239,15 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
                 x=x_smooth, y=y_smooth,
                 mode='lines',
                 line=dict(color=color, width=2.5),
-                name=f'{days} Days',
-                legendgroup=f'{days}'
+                name=f'{expiry}',
+                legendgroup=f'{expiry}'
             ))
             # add actual data points
             fig.add_trace(go.Scatter(
                 x=x, y=y,
                 mode='markers',
                 marker=dict(color=color, size=6, opacity=0.5),
-                legendgroup=f'{days}',
+                legendgroup=f'{expiry}',
                 showlegend=False,
                 hoverinfo='skip'
             ))
@@ -257,7 +257,7 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
                 x=x, y=y,
                 mode='lines+markers',
                 line=dict(color=color, width=2.5),
-                name=f'{days} Days'
+                name=f'{expiry}'
             ))
 
     # vertical line for spot price
@@ -272,7 +272,7 @@ def plot_2d_skew_by_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
         yaxis_title="Implied Volatility (%)",
         hovermode="x unified",
         template="plotly_dark",  #  'plotly_white'
-        legend=dict(title="Days to Expiry", yanchor="top", y=1, xanchor="left", x=1.02)
+        legend=dict(title="Expiration Date", yanchor="top", y=1, xanchor="left", x=1.02)
     )
 
     return fig
