@@ -78,6 +78,7 @@ def get_vol_surface_data(
                 'moneyness': row['strike'] / underlying_price,
                 'implied_volatility': iv * 100,
                 'delta': row.get('delta', np.nan),
+                'price': row.get('price', np.nan),
             })
 
     return pd.DataFrame(surface_data)

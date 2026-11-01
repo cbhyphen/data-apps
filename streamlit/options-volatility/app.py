@@ -41,17 +41,6 @@ with st.spinner("fetching data..."):
         if vrp_fig is not None:
             st.plotly_chart(vrp_fig, use_container_width=True)
 
-        # Build Strike vs. Expiration Date IV table
-        pivot_df = (
-            df.drop_duplicates(subset=["expiration_date", "strike"])
-            .pivot(index="strike", columns="expiration_date", values="implied_volatility")
-            .sort_index()
-        )
-        pivot_df.index.name = "Strike"
-        display_df = pivot_df.apply(
-            lambda col: col.map(lambda x: "NA" if pd.isna(x) else f"{x:.2f}%")
-        )
-
         # Color rows based on whether strike is above or at/below spot price
         spot_price = (df["strike"] / df["moneyness"]).iloc[0]
 
@@ -63,9 +52,35 @@ with st.spinner("fetching data..."):
             )
             return [color] * len(row)
 
-        st.dataframe(
-            display_df.style.apply(highlight_by_spot, axis=1),
-            use_container_width=True,
-        )
+        # Tabbed tables per expiration date (all corresponding to max_days slider)
+        expiries = sorted(df["expiration_date"].unique())
+        tabs = st.tabs(expiries)
+
+        for tab, expiry in zip(tabs, expiries):
+            with tab:
+                exp_df = (
+                    df[df["expiration_date"] == expiry]
+                    .drop_duplicates(subset=["strike"])
+                    .sort_values("strike")
+                    .set_index("strike")
+                )
+                exp_df.index.name = "Strike"
+
+                display_df = pd.DataFrame(
+                    {
+                        "Delta": exp_df["delta"].map(
+                            lambda x: "NA" if pd.isna(x) else f"{x:.3f}"
+                        ),
+                        "Price": exp_df["price"].map(
+                            lambda x: "NA" if pd.isna(x) else f"${x:.2f}"
+                        ),
+                    },
+                    index=exp_df.index,
+                )
+
+                st.dataframe(
+                    display_df.style.apply(highlight_by_spot, axis=1),
+                    use_container_width=True,
+                )
     else:
         st.warning(f"no options data available to plot for {ticker}.")

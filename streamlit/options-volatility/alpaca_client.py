@@ -151,11 +151,21 @@ def fetch_raw_options_chain(
         greeks = snapshot.greeks
         delta = greeks.delta if greeks else np.nan
 
+        latest_trade = snapshot.latest_trade
+        latest_quote = snapshot.latest_quote
+        if latest_trade and latest_trade.price:
+            price = float(latest_trade.price)
+        elif latest_quote and latest_quote.bid_price and latest_quote.ask_price:
+            price = (float(latest_quote.bid_price) + float(latest_quote.ask_price)) / 2.0
+        else:
+            price = np.nan
+
         records.append({
             'symbol': sym,
             'expiration_date': closest_expiry,
             'contract_type': contract_type,
             'strike': strike,
+            'price': price,
             'impliedVolatility': iv if iv is not None else np.nan,
             'delta': delta if delta is not None else np.nan,
         })
