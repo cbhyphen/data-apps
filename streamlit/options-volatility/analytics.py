@@ -342,3 +342,81 @@ def plot_vrp_by_expiry(multi_vrp_df: pd.DataFrame, ticker: str):
     )
 
     return fig
+
+
+def plot_deltas_by_strike_and_expiry(df: pd.DataFrame, ticker: str, max_lines: int = 8):
+    """
+    plot OTM option absolute deltas across strike and expiration date
+    """
+    if df.empty or 'expiration_date' not in df.columns or 'delta' not in df.columns:
+        print("no delta data available to plot !!!")
+        return None
+
+    df_valid = df.dropna(subset=['delta'])
+    if df_valid.empty:
+        print("no delta data available to plot !!!")
+        return None
+
+    underlying_price = get_latest_price(ticker)
+    expiries = sorted(df_valid['expiration_date'].unique())[:max_lines]
+
+    fig = go.Figure()
+    colors = px.colors.sequential.Viridis_r
+
+    for i, expiry in enumerate(expiries):
+        df_exp = (
+            df_valid[df_valid['expiration_date'] == expiry]
+            .sort_values(by='strike')
+            .drop_duplicates(subset=['strike'])
+        )
+
+        puts_otm = df_exp[df_exp['strike'] <= underlying_price]
+        calls_otm = df_exp[df_exp['strike'] > underlying_price]
+
+        color_idx = int((i / max(1, len(expiries) - 1)) * (len(colors) - 1))
+        color = colors[color_idx]
+        shown_in_legend = False
+
+        if not calls_otm.empty:
+            fig.add_trace(go.Scatter(
+                x=calls_otm['strike'],
+                y=np.abs(calls_otm['delta']),
+                mode='lines+markers',
+                line=dict(color=color, width=2.5, dash='solid'),
+                marker=dict(color=color, size=5, opacity=0.6),
+                name=f'{expiry}',
+                legendgroup=f'{expiry}',
+                showlegend=True,
+            ))
+            shown_in_legend = True
+
+        if not puts_otm.empty:
+            fig.add_trace(go.Scatter(
+                x=puts_otm['strike'],
+                y=np.abs(puts_otm['delta']),
+                mode='lines+markers',
+                line=dict(color=color, width=2.5, dash='dash'),
+                marker=dict(color=color, size=5, opacity=0.6),
+                name=f'{expiry}',
+                legendgroup=f'{expiry}',
+                showlegend=not shown_in_legend,
+            ))
+
+    fig.add_vline(
+        x=underlying_price,
+        line_dash="dash",
+        line_color="red",
+        annotation_text=f"Spot: ${underlying_price:.2f}",
+        annotation_position="top right",
+    )
+
+    fig.update_layout(
+        title=f"{ticker} OTM Absolute Delta by Expiration (Calls: Solid, Puts: Dashed)",
+        xaxis_title="Strike Price",
+        yaxis_title="Absolute Delta |Δ|",
+        hovermode="x unified",
+        template="plotly_dark",
+        legend=dict(title="Expiration Date", yanchor="top", y=1, xanchor="left", x=1.02),
+    )
+
+    return fig

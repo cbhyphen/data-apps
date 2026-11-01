@@ -5,6 +5,7 @@ from analytics import (
     get_multi_window_vrp,
     get_vol_surface_data,
     plot_2d_skew_by_expiry,
+    plot_deltas_by_strike_and_expiry,
     plot_vrp_by_expiry,
 )
 
@@ -24,6 +25,7 @@ with st.spinner("fetching data..."):
 
         # Generate plots
         fig = plot_2d_skew_by_expiry(df, ticker)
+        delta_fig = plot_deltas_by_strike_and_expiry(df, ticker)
         vrp_fig = plot_vrp_by_expiry(vrp_df, ticker)
     except RateLimitError as e:
         st.warning(str(e))
@@ -32,6 +34,9 @@ with st.spinner("fetching data..."):
     # Display in Streamlit
     if fig is not None:
         st.plotly_chart(fig, use_container_width=True)
+
+        if delta_fig is not None:
+            st.plotly_chart(delta_fig, use_container_width=True)
 
         if vrp_fig is not None:
             st.plotly_chart(vrp_fig, use_container_width=True)
