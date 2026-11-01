@@ -14,7 +14,7 @@ from alpaca.data.requests import OptionSnapshotRequest, StockLatestTradeRequest,
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOptionContractsRequest
 from alpaca.data.timeframe import TimeFrame
-from alpaca.data.enums import DataFeed
+from alpaca.data.enums import Adjustment, DataFeed
 
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
@@ -89,13 +89,13 @@ def fetch_raw_options_chain(
     strike_min = underlying_price * (1.0 - moneyness_bound)
     strike_max = underlying_price * (1.0 + moneyness_bound)
 
-    # contracts request strictly around the target Friday window (including Thursday for holidays)
-    # and bounded by strike range so pagination limits don't truncate puts or near-spot strikes
+    # contracts request around the target expiration window and bounded by strike range
+    # so pagination limits don't truncate puts or near-spot strikes
     contracts_req = GetOptionContractsRequest(
         underlying_symbols=[ticker_symbol],
         status="active",
-        expiration_date_gte=target_date - timedelta(days=1),
-        expiration_date_lte=target_date,
+        expiration_date_gte=target_date - timedelta(days=3),
+        expiration_date_lte=target_date + timedelta(days=3),
         strike_price_gte=f"{strike_min:.2f}",
         strike_price_lte=f"{strike_max:.2f}",
         limit=1000,
@@ -107,10 +107,10 @@ def fetch_raw_options_chain(
     if not contracts_meta.option_contracts:
         raise ValueError(f"no options contracts found for {ticker_symbol} around {target_date}")
 
-    # prefer exact Friday match, falling back to Thursday if Friday is a market holiday
+    # find closest expiration date (tie-breaking toward Fridays when equidistant)
     closest_expiry = min(
         {c.expiration_date for c in contracts_meta.option_contracts},
-        key=lambda exp: abs((exp - target_date).days),
+        key=lambda exp: (abs((exp - target_date).days), 0 if exp.weekday() == 4 else 1),
     )
 
     t_years = (closest_expiry - today).days / 365.0
@@ -200,14 +200,18 @@ def get_alpaca_ohlcv(
         timeframe=TimeFrame.Day,
         start=start_date,
         end=end_date,
+        adjustment=Adjustment.SPLIT,
         # alpaca free tier restricts recent SIP data (15-min delay)
         # `feed=DataFeed.IEX` makes sure get this delayed data
         feed=DataFeed.IEX
     )
 
     bars = client.get_stock_bars(request_params)
-    df = bars.df.reset_index()
-
-    df.rename(columns={'symbol': 'ticker', 'timestamp': 'date'}, inplace=True)
     column_order = ['date', 'ticker', 'open', 'high', 'low', 'close', 'volume']
+    if bars.df.empty:
+        return pd.DataFrame(columns=column_order)
+
+    df = bars.df.reset_index()
+    df.rename(columns={'symbol': 'ticker', 'timestamp': 'date'}, inplace=True)
+    df = df.sort_values('date').reset_index(drop=True)
     return df[column_order]

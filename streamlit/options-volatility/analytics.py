@@ -33,7 +33,7 @@ def get_vol_surface_data(
 ) -> pd.DataFrame:
     """
     fetch option data for next 'max_days',
-    collect IV for OTM puts and calls,
+    collect IV and delta for OTM puts and calls,
     and limit strikes by moneyness.
     """
     surface_data = []
@@ -77,6 +77,7 @@ def get_vol_surface_data(
                 'strike': row['strike'],
                 'moneyness': row['strike'] / underlying_price,
                 'implied_volatility': iv * 100,
+                'delta': row.get('delta', np.nan),
             })
 
     return pd.DataFrame(surface_data)
@@ -86,6 +87,8 @@ def compute_yang_zhang(df, window, periods_per_year=252):
     """
     compute Yang-Zhang realized volatility estimator on daily OHLC data
     """
+    if df.empty or len(df) < 2:
+        return np.nan
 
     o = pd.Series(df['open'].astype(float).values, index=df.index)
     h = pd.Series(df['high'].astype(float).values, index=df.index)
@@ -103,7 +106,7 @@ def compute_yang_zhang(df, window, periods_per_year=252):
 
     rs = log_ho * log_hc + log_lo * log_lc
 
-    if window == 1:
+    if window <= 1:
         var_overnight = log_oc ** 2
         var_open_to_close = log_co ** 2
         var_rs = rs
@@ -116,8 +119,10 @@ def compute_yang_zhang(df, window, periods_per_year=252):
 
     yz_var = var_overnight + k * var_open_to_close + (1 - k) * var_rs
     latest_var = yz_var.iloc[-1]
-    latest_vol = np.sqrt(latest_var * periods_per_year)
+    if pd.isna(latest_var):
+        return np.nan
 
+    latest_vol = np.sqrt(max(0.0, float(latest_var)) * periods_per_year)
     return float(latest_vol)
 
 
@@ -138,14 +143,16 @@ def get_multi_window_vrp(
         windows = get_delta_next_fridays(max_days)
 
     max_window = max(max(windows), min_rv_window if use_min_rv else 0)
-    lookback_days = int(max_window * 3)
+    lookback_days = max(120, int(max_window * 3))
     df_ohlc = get_alpaca_ohlcv(ticker_symbol, lookback_days)
     underlying_price = get_latest_price(ticker_symbol)
 
     results = []
 
     for w in windows:
-        rv_window = max(min_rv_window, w) if use_min_rv else w
+        # convert calendar-day target window to trading days for Yang-Zhang RV
+        trading_days = max(2, int(round(w * 252 / 365)))
+        rv_window = max(min_rv_window, trading_days) if use_min_rv else trading_days
         try:
             rv_estimate = compute_yang_zhang(df_ohlc, window=rv_window)
         except Exception as e:
@@ -165,12 +172,12 @@ def get_multi_window_vrp(
             closest_expiry = chain_data['closest_expiry_str']
             actual_days = int(round(t * 365))
 
-            # drop rows with missing delta or implied volatility
-            calls = calls.dropna(subset=['delta', 'impliedVolatility']).copy()
-            puts = puts.dropna(subset=['delta', 'impliedVolatility']).copy()
+            # ATM IV (only requires valid impliedVolatility; keeps delta intact in calls/puts)
+            valid_calls = calls.dropna(subset=['impliedVolatility'])
+            if valid_calls.empty:
+                raise ValueError(f"no calls with valid IV for target window {w}d")
 
-            # ATM IV
-            atm_call = calls.iloc[(calls['strike'] - spot).abs().argsort()[:1]].iloc[0]
+            atm_call = valid_calls.iloc[(valid_calls['strike'] - spot).abs().argsort()[:1]].iloc[0]
             atm_iv = atm_call['impliedVolatility']
 
         except RateLimitError:
@@ -323,7 +330,11 @@ def plot_vrp_by_expiry(multi_vrp_df: pd.DataFrame, ticker: str):
 
     fig.update_layout(
         title=f"{ticker} VRP by Expiration",
-        xaxis_title="Days to Expiry",
+        xaxis=dict(
+            title="Days to Expiry",
+            tickmode="array",
+            tickvals=multi_vrp_df['Target_Days'].tolist(),
+        ),
         yaxis_title="Percent (%)",
         hovermode="x unified",
         template="plotly_dark",

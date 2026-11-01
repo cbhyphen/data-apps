@@ -11,7 +11,7 @@ from analytics import (
 
 # User inputs
 with st.sidebar.form("controls"):
-    ticker = st.text_input("Ticker Symbol", value="AMZN")
+    ticker = st.text_input("Ticker Symbol", value="AMZN").strip().upper()
     max_days = st.slider("Max Days to Expiry", min_value=30, max_value=60, value=45)
     st.form_submit_button("Generate Plot")
 
